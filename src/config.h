@@ -25,7 +25,6 @@ const char wifiInitialApPassword[] = "ghghgh12";
 
 #define STRING_LEN 128
 #define NUMBER_LEN 32
-#define MAX_NUM_OF_SENSORS 5
 
 static char stypeVals[][STRING_LEN] = { "sml", "s0", "other" };
 
@@ -48,7 +47,7 @@ static const u1_t PROGMEM APPKEY[16] = { 0x85, 0x38, 0x35, 0x03, 0x15, 0x10, 0x1
 void os_getDevKey (u1_t* buf) {  memcpy_P(buf, APPKEY, 16);}
 
 //welche OBIS-Werte sollen übermittelt werden? Standardmäßig Bezugs- und Einspeisezählerstand
-const String obisIds[]={"1-0:1.8.0","1-0:2.8.0"};
+//const String obisIds[]={"1-0:1.8.0","1-0:2.8.0"};
 
 bool formStringToByteArray(String fs, uint8_t* bytearray, uint8_t num_bytes){
     fs.replace(" ","");
@@ -64,14 +63,36 @@ bool formStringToByteArray(String fs, uint8_t* bytearray, uint8_t num_bytes){
     return true;
 }
 
-static const SensorConfig SENSOR_CONFIGS[] = {
-    {.pin = 21,
-     .name = "1",
-     .numeric_only = false,
-     .status_led_enabled = true,
-     .status_led_inverted = true,
-     .status_led_pin = 5,
-     .interval = 0}};
+bool formObisToArray(String fs, String* stringarray){
+    bool retval=true;
+    uint8_t MAX_OBIS_FIELDS=8;
+    regex_t reegex;
+    char buf[STRING_LEN];
+    fs.toCharArray(buf, STRING_LEN);
+    //regex for multiple, space separated obis identifier
+    int v=regcomp( &reegex, "^([0-9]\\-[0-9]{1,2}:)?[0-9]\\.[0-9]\\.[0-9]( ([0-9]\\-[0-9]{1,2}:)?[0-9]\\.[0-9]\\.[0-9]){0,3}$", REG_EXTENDED | REG_NOSUB);
+    //Serial.println(buf);
+    regmatch_t pmatch[MAX_OBIS_FIELDS+1];   
+    //Serial.println(regexec(&reegex, buf, 0, NULL, 0));
+    if(regexec(&reegex, buf, MAX_OBIS_FIELDS+1, pmatch, 0)!=0) {
+        retval=false;  
+    }else{
+        int a=0;
+        for(int i=0;i<fs.length();i++){
+            char c=fs.charAt(i);
+            if(c!=' '){
+                stringarray[a].concat(c);
+            }else{
+                a++;
+                stringarray[a]="";
+            }
+        }
+        
+    }
+    return retval;
+}
+
+
 
 //const uint8_t NUM_OF_SENSORS = sizeof(SENSOR_CONFIGS) / sizeof(SensorConfig);
 

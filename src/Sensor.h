@@ -45,7 +45,7 @@ uint64_t millis64()
 
 class SensorConfig{
 public:
-    SensorConfig(){}
+    
     const uint8_t pin;
     const char *name;
     const bool numeric_only;

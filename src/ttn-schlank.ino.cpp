@@ -69,24 +69,13 @@ const lmic_pinmap *pPinMap = Arduino_LMIC::GetPinmap_ThisBoard();
 
 boolean sending=false;
 
-
-;
-
-
-
-
-
-
-
-
 DNSServer dnsServer;
 WebServer server(80);
-IotWebConf iotWebConf(thingName, &dnsServer, &server, wifiInitialApPassword, "6");
+IotWebConf iotWebConf(thingName, &dnsServer, &server, wifiInitialApPassword, "7");
 iotwebconf::OptionalGroupHtmlFormatProvider optionalGroupHtmlFormatProvider;
 
 
-char sensorGroupId[MAX_NUM_OF_SENSORS][10];
-SensorGroup* sensorGroups[MAX_NUM_OF_SENSORS];
+SensorGroup sensorGroup("sensorGroup");
 char loraDeveuiValue[STRING_LEN];
 char loraAppeuiValue[STRING_LEN];
 char loraAppkeyValue[STRING_LEN];
@@ -140,26 +129,21 @@ bool formValidator(iotwebconf::WebRequestWrapper* webRequestWrapper){
       retval=false;
   }
 
-  //sensors
-  for(int i=0;i<MAX_NUM_OF_SENSORS;i++){
-    if(!sensorGroups[i]->isActive()){
-      continue;
-    }
-
-    //Bezeichner
-    String identifier= webRequestWrapper->arg(sensorGroups[i]->identifierParam.getId());
+  //sensor
+  //Bezeichner
+  String identifier= webRequestWrapper->arg(sensorGroup.identifierParam.getId());
     
-    if(identifier.length()==0){
-      sensorGroups[i]->identifierParam.errorMessage = "Bezeichner darf nicht leer sein!";
+  if(identifier.length()==0){
+      sensorGroup.identifierParam.errorMessage = "Bezeichner darf nicht leer sein!";
       retval=false;
-    }
+  }
 
     
-    //OBIS
-    String stype= webRequestWrapper->arg(sensorGroups[i]->stypeParam.getId());
-    String opt1= webRequestWrapper->arg(sensorGroups[i]->opt1Param.getId());
+  //OBIS
+  String stype= webRequestWrapper->arg(sensorGroup.stypeParam.getId());
+  String opt1= webRequestWrapper->arg(sensorGroup.opt1Param.getId());
     
-    if(stype.compareTo("sml")==0){
+  if(stype.compareTo("sml")==0){
       regex_t reegex;
       char buf[STRING_LEN];
       opt1.toCharArray(buf, STRING_LEN);
@@ -169,11 +153,11 @@ bool formValidator(iotwebconf::WebRequestWrapper* webRequestWrapper){
       Serial.println(v);
       Serial.println(regexec(&reegex, buf, 0, NULL, 0));
       if(regexec(&reegex, buf, 0, NULL, 0)!=0) {
-        sensorGroups[i]->opt1Param.errorMessage = "Zu lesende OBIS-Ids durch Leerzeichen getrennt eingeben!";
+        sensorGroup.opt1Param.errorMessage = "Zu lesende OBIS-Ids durch Leerzeichen getrennt eingeben!";
         retval=false;  
       } 
-    }
   }
+  
   return retval;
 }
 
@@ -220,12 +204,9 @@ void iotwSetup(){
   
   //sensors
 
-  for(int i=0; i<MAX_NUM_OF_SENSORS;i++){
-    sprintf(sensorGroupId[i], "s%d", i);
-    //Serial.print(shutterGroupId[i]);
-    sensorGroups[i] = new SensorGroup(sensorGroupId[i]);
-    iotWebConf.addParameterGroup(sensorGroups[i]);
-  }
+  
+  iotWebConf.addParameterGroup(&sensorGroup);
+  
 
 
   
@@ -246,8 +227,9 @@ void iotwSetup(){
 
 
 
-
+//start is the number of the byte where the uint32 val starts, beginning at zero
 void fillbufferwithu32(uint32_t v, uint8_t start){
+    start+=1; //reserve one byte at the beginning for indication of given values as a mask
     mydata[start+0] = v & 0xFF; // 0x78
     mydata[start+1] = (v >> 8) & 0xFF; // 0x56
     mydata[start+2] = (v >> 16) & 0xFF; // 0x34
@@ -288,6 +270,9 @@ void publish(Sensor *sensor, sml_file *file){
                     entry->obj_name->str[0], entry->obj_name->str[1],
                     entry->obj_name->str[2], entry->obj_name->str[3],
                     entry->obj_name->str[4], entry->obj_name->str[5]);
+
+                String obisIds[]={"1-0:1.8.0","1-0:2.8.0"};
+
                 for(int j=0;j<sizeof(obisIds)/sizeof(obisIds[0]);j++){
                     if(String(obisIdentifier).startsWith( obisIds[j])){
                         DEBUG("OBIS-Id: %s",obisIdentifier);
@@ -478,16 +463,13 @@ void pseudoSetup(){
     #endif
 
 	// Setup reading heads
-	DEBUG("Setting up max. %d configured sensors...", MAX_NUM_OF_SENSORS);
+	//DEBUG("Setting up max. %d configured sensors...", MAX_NUM_OF_SENSORS);
 	//const SensorConfig *config = SENSOR_CONFIGS;
-	for (uint8_t i = 0; i < MAX_NUM_OF_SENSORS; i++){
-    if(!sensorGroups[i]->isActive()){
-      continue;
-    }
+
 
   SensorConfig* config = (SensorConfig*) (sizeof(SensorConfig));
 
-   (*config) =  
+static const SensorConfig SENSOR_CONFIG = 
     {.pin = 21,
      .name = "1",
      .numeric_only = false,
@@ -497,11 +479,9 @@ void pseudoSetup(){
      .interval = 0};
 
 
-
-
 		Sensor *sensor = new Sensor(config, process_message);
 		sensors->push_back(sensor);
-	}
+
 	DEBUG("Sensor setup done.");
 
     DEBUG(F("Starting"));
