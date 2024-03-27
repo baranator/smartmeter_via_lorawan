@@ -33,6 +33,8 @@
 #include <Arduino.h>
 #include <list>
 #include <arduino_lmic_hal_boards.h>
+#include <esp_sleep.h>
+#define SERIAL_DEBUG true
 #include <SerialDebug.h>
 
 #include <lmic.h>
@@ -52,10 +54,31 @@
 #include "SensorGroup.h"
 
 
+//General
+
+boolean firstRun=true;
+Sensor * smlSensor;
 
 
+// IOT Webconf
 
-std::list<Sensor *> *sensors = new std::list<Sensor *>();
+DNSServer dnsServer;
+WebServer server(80);
+IotWebConf iotWebConf(thingName, &dnsServer, &server, wifiInitialApPassword, "7");
+iotwebconf::OptionalGroupHtmlFormatProvider optionalGroupHtmlFormatProvider;
+
+SensorGroup sensorGroup("sensorGroup");
+char loraDeveuiValue[STRING_LEN];
+char loraAppeuiValue[STRING_LEN];
+char loraAppkeyValue[STRING_LEN];
+
+IotWebConfParameterGroup lorawanGroup = IotWebConfParameterGroup("lorawang", "LoRaWan");
+iotwebconf::TextParameter loraDeveuiParam = iotwebconf::TextParameter("Dev-EUI (8 Byte, little-endian)", "ldeveui", loraDeveuiValue, STRING_LEN);
+iotwebconf::TextParameter loraAppeuiParam = iotwebconf::TextParameter("App-EUI (8 Byte, little-endian)", "lappeui", loraAppeuiValue, STRING_LEN);
+iotwebconf::TextParameter loraAppkeyParam = iotwebconf::TextParameter("App-Key (16 Byte big-endian", "lappkey", loraAppkeyValue, STRING_LEN);
+
+
+//LoRaWan Stuff
 
 static uint8_t mydata[] = "Hello, world!";
 static osjob_t sendjob;
@@ -67,46 +90,42 @@ const unsigned TX_INTERVAL = 60;
 const Arduino_LMIC::HalConfiguration_t myConfig;
 const lmic_pinmap *pPinMap = Arduino_LMIC::GetPinmap_ThisBoard();
 
+
+
+//static const u1_t PROGMEM APPEUI[8]={ 0x77, 0x6D, 0x54, 0xDF, 0x56, 0x54, 0x54, 0x56 };
+//void os_getArtEui (u1_t* buf) { memcpy_P(buf, APPEUI, 8);}
+void os_getArtEui (u1_t* buf) { 
+  u1_t APPEUI[8];
+  formStringToByteArray(String(loraAppeuiValue), APPEUI, 8);
+  memcpy_P(buf, APPEUI, 8);
+}
+
+
+// This should also be in little endian format, see above.
+//static const u1_t PROGMEM DEVEUI[8]={ 0x34, 0x2F, 0x06, 0xD0, 0x7E, 0xD5, 0xB3, 0x70 };
+//void os_getDevEui (u1_t* buf) { memcpy_P(buf, DEVEUI, 8);}
+void os_getDevEui (u1_t* buf) { 
+  u1_t DEVEUI[8];
+  formStringToByteArray(String(loraDeveuiValue), DEVEUI, 8);
+  memcpy_P(buf, DEVEUI, 8);
+}
+
+// This key should be in big endian format (or, since it is not really a
+// number but a block of memory, endianness does not really apply). In
+// practice, a key taken from ttnctl can be copied as-is.
+//static const u1_t PROGMEM APPKEY[16] = { 0x85, 0x38, 0x35, 0x03, 0x15, 0x10, 0x11, 0x3E, 0x64, 0x12, 0xD9, 0xDD, 0xA9, 0xA1, 0x48, 0xFF };
+//void os_getDevKey (u1_t* buf) {  memcpy_P(buf, APPKEY, 16);}
+
+void os_getDevKey (u1_t* buf) {  
+  u1_t APPKEY[16];
+  formStringToByteArray(String(loraAppkeyValue), APPKEY, 16);
+  memcpy_P(buf, APPKEY, 16);
+}
+
 boolean sending=false;
 
-DNSServer dnsServer;
-WebServer server(80);
-IotWebConf iotWebConf(thingName, &dnsServer, &server, wifiInitialApPassword, "7");
-iotwebconf::OptionalGroupHtmlFormatProvider optionalGroupHtmlFormatProvider;
 
 
-SensorGroup sensorGroup("sensorGroup");
-char loraDeveuiValue[STRING_LEN];
-char loraAppeuiValue[STRING_LEN];
-char loraAppkeyValue[STRING_LEN];
-
-
-
-IotWebConfParameterGroup lorawanGroup = IotWebConfParameterGroup("lorawang", "LoRaWan");
-iotwebconf::TextParameter loraDeveuiParam = iotwebconf::TextParameter("Dev-EUI (8 Byte, little-endian)", "ldeveui", loraDeveuiValue, STRING_LEN);
-iotwebconf::TextParameter loraAppeuiParam = iotwebconf::TextParameter("App-EUI (8 Byte, little-endian)", "lappeui", loraAppeuiValue, STRING_LEN);
-iotwebconf::TextParameter loraAppkeyParam = iotwebconf::TextParameter("App-Key (16 Byte big-endian", "lappkey", loraAppkeyValue, STRING_LEN);
-
-
-boolean firstRun=true;
-
-
-
-boolean isHexString(String s, uint8_t num_bytes){
-  regex_t reegex;
-  char regstr[50];
-  sprintf(regstr, "^[0-9a-f]{2}( [0-9a-f]{2}){%d}$", num_bytes-1);
-  char buf[STRING_LEN];
-  s.toCharArray(buf, STRING_LEN);
-  int v=regcomp( &reegex, regstr, REG_EXTENDED | REG_NOSUB);
-  Serial.print("kompil: ");Serial.println(v);
-  if(regexec(&reegex, buf, 0, NULL, 0)!=0) {
-    Serial.println("notso hexy!");
-    return false;
-  }
-  Serial.println("voll hexig!");
-  return true;
-}
 
 bool formValidator(iotwebconf::WebRequestWrapper* webRequestWrapper){
   bool retval=true;
@@ -206,8 +225,6 @@ void iotwSetup(){
 
   
   iotWebConf.addParameterGroup(&sensorGroup);
-  
-
 
   
   
@@ -218,6 +235,8 @@ void iotwSetup(){
   server.on("/", handleRoot);
   server.on("/config", []{ iotWebConf.handleConfig(); });
   server.onNotFound([](){ iotWebConf.handleNotFound(); });
+
+  DEBUG(F("iotwebconf inited"));
 }
 
 
@@ -407,7 +426,14 @@ void onEvent (ev_t ev) {
               DEBUG(F(" bytes of payload"));
             }
             // Schedule next transmission
-            os_setTimedCallback(&sendjob, os_getTime()+sec2osticks(TX_INTERVAL), do_send);
+
+              
+            // Konfiguriere den Wake-up-Trigger. Hier verwenden wir die Timer-Funktion.
+            esp_sleep_enable_timer_wakeup(TX_INTERVAL*1000*1000); // 10.000.000 Mikrosekunden = 10 Sekunden
+
+            // Gehe in den Deep-Sleep-Modus.
+            esp_deep_sleep_start();
+
             break;
         case EV_LOST_TSYNC:
             DEBUG(F("EV_LOST_TSYNC"));
@@ -467,24 +493,16 @@ void pseudoSetup(){
 	//const SensorConfig *config = SENSOR_CONFIGS;
 
 
-  SensorConfig* config = (SensorConfig*) (sizeof(SensorConfig));
+  static const SensorConfig* config = new SensorConfig{
+    .pin = (uint8_t)atoi(sensorGroup.dataPinValue),
+    .numeric_only = false,
+    .interval = 99 //only once
+  };
 
-static const SensorConfig SENSOR_CONFIG = 
-    {.pin = 21,
-     .name = "1",
-     .numeric_only = false,
-     .status_led_enabled = true,
-     .status_led_inverted = true,
-     .status_led_pin = 5,
-     .interval = 0};
+  
+	smlSensor = new Sensor(config, process_message);
 
-
-		Sensor *sensor = new Sensor(config, process_message);
-		sensors->push_back(sensor);
-
-	DEBUG("Sensor setup done.");
-
-    DEBUG(F("Starting"));
+    DEBUG(F("Sensor setup done.Starting"));
 //    DEBUG(RST_LoRa);
 
     // LMIC init
@@ -498,23 +516,17 @@ static const SensorConfig SENSOR_CONFIG =
 
 
 void setup() {
-      //Serial.begin(115200);
-      SERIAL_DEBUG_SETUP(9600);
-  Serial.println();
-  Serial.println("Starting up...");
+  SERIAL_DEBUG_SETUP(9600);
+
+  DEBUG(F("Starting up..."));
 
   iotwSetup();
-            
-
-  Serial.println("Ready.");
 
     
 }
 
 void pseudoLoop(){
-  for (std::list<Sensor*>::iterator it = sensors->begin(); it != sensors->end(); ++it){
-    (*it)->loop();
-  }
+    smlSensor->loop();
     os_runloop_once();
 }
 
@@ -534,9 +546,9 @@ void loop() {
     if(firstRun){
       firstRun=false;
       pseudoSetup();
-      Serial.println(F("Gerät gestartet; Pseudo-Setup"));
+      DEBUG(F("Gerät gestartet; Pseudo-Setup"));
     }
-    Serial.println(F("loop"));
+    DEBUG(F("loop"));
     pseudoLoop();
     
   }

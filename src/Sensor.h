@@ -32,8 +32,7 @@ enum State
     READ_CHECKSUM
 };
 
-uint64_t millis64()
-{
+uint64_t millis64(){
     static uint32_t low32, high32;
     uint32_t new_low32 = millis();
     if (new_low32 < low32)
@@ -47,11 +46,7 @@ class SensorConfig{
 public:
     
     const uint8_t pin;
-    const char *name;
     const bool numeric_only;
-    const bool status_led_enabled;
-    const bool status_led_inverted;
-    const uint8_t status_led_pin;
     const uint8_t interval;
 };
 
@@ -61,35 +56,21 @@ public:
     Sensor(const SensorConfig *config, void (*callback)(byte *buffer, size_t len, Sensor *sensor))
     {
         this->config = config;
-        DEBUG("Initializing sensor %s...", this->config->name);
+        DEBUG("Initializing sensor at pin %i...", this->config->pin);
         this->callback = callback;
         this->serial = unique_ptr<SoftwareSerial>(new SoftwareSerial());
         this->serial->begin(9600, SWSERIAL_8N1, this->config->pin, -1, false);
         this->serial->enableTx(false);
         this->serial->enableRx(true);
-        DEBUG("Initialized sensor %s.", this->config->name);
+        DEBUG("Initialized sensor at pin %i.", this->config->pin);
 
-        if (this->config->status_led_enabled)
-        {
-            this->status_led = unique_ptr<JLed>(new JLed(this->config->status_led_pin));
-            if (this->config->status_led_inverted)
-            {
-                this->status_led->LowActive();
-            }
-        }
 
         this->init_state();
     }
 
-    void loop()
-    {
+    void loop(){
         this->run_current_state();
         yield();
-        if (this->config->status_led_enabled)
-        {
-            this->status_led->Update();
-            yield();
-        }
     }
 
 private:
@@ -102,7 +83,6 @@ private:
     uint8_t loop_counter = 0;
     State state = INIT;
     void (*callback)(byte *buffer, size_t len, Sensor *sensor) = NULL;
-    unique_ptr<JLed> status_led;
 
     void run_current_state()
     {
@@ -151,26 +131,26 @@ private:
     {
         if (new_state == STANDBY)
         {
-            DEBUG("State of sensor %s is 'STANDBY'.", this->config->name);
+            DEBUG("State of sensor pin %i is 'STANDBY'.", this->config->pin);
         }
         else if (new_state == WAIT_FOR_START_SEQUENCE)
         {
-            DEBUG("State of sensor %s is 'WAIT_FOR_START_SEQUENCE'.", this->config->name);
+            DEBUG("State of sensor pin %i is 'WAIT_FOR_START_SEQUENCE'.", this->config->pin);
             this->last_state_reset = millis();
             this->position = 0;
         }
         else if (new_state == READ_MESSAGE)
         {
-            DEBUG("State of sensor %s is 'READ_MESSAGE'.", this->config->name);
+            DEBUG("State of sensor pin %i is 'READ_MESSAGE'.", this->config->pin);
         }
         else if (new_state == READ_CHECKSUM)
         {
-            DEBUG("State of sensor %s is 'READ_CHECKSUM'.", this->config->name);
+            DEBUG("State of sensor pin %i is 'READ_CHECKSUM'.", this->config->pin);
             this->bytes_until_checksum = 3;
         }
         else if (new_state == PROCESS_MESSAGE)
         {
-            DEBUG("State of sensor %s is 'PROCESS_MESSAGE'.", this->config->name);
+            DEBUG("State of sensor pin %i is 'PROCESS_MESSAGE'.", this->config->pin);
         };
         this->state = new_state;
     }
@@ -219,10 +199,6 @@ private:
             {
                 // Start sequence has been found
                 DEBUG("Start sequence found.");
-                if (this->config->status_led_enabled)
-                {
-                    this->status_led->Blink(50, 50).Repeat(3);
-                }
                 this->set_state(READ_MESSAGE);
                 return;
             }
