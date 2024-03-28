@@ -71,21 +71,19 @@ SensorGroup sensorGroup("sensorGroup");
 char loraDeveuiValue[STRING_LEN];
 char loraAppeuiValue[STRING_LEN];
 char loraAppkeyValue[STRING_LEN];
+char loraIntervalValue[STRING_LEN];
 
 IotWebConfParameterGroup lorawanGroup = IotWebConfParameterGroup("lorawang", "LoRaWan");
 iotwebconf::TextParameter loraDeveuiParam = iotwebconf::TextParameter("Dev-EUI (8 Byte, little-endian)", "ldeveui", loraDeveuiValue, STRING_LEN);
 iotwebconf::TextParameter loraAppeuiParam = iotwebconf::TextParameter("App-EUI (8 Byte, little-endian)", "lappeui", loraAppeuiValue, STRING_LEN);
 iotwebconf::TextParameter loraAppkeyParam = iotwebconf::TextParameter("App-Key (16 Byte big-endian", "lappkey", loraAppkeyValue, STRING_LEN);
+iotwebconf::TextParameter loraIntervalParam = iotwebconf::TextParameter("Sendeinterval in min", "linterval", loraIntervalValue, STRING_LEN,"60");
 
 
 //LoRaWan Stuff
 
-static uint8_t mydata[] = "Hello, world!";
+static uint8_t* loraSendBuffer;
 static osjob_t sendjob;
-
-// Schedule TX every this many seconds (might become longer due to duty
-// cycle limitations).
-const unsigned TX_INTERVAL = 60;
 
 const Arduino_LMIC::HalConfiguration_t myConfig;
 const lmic_pinmap *pPinMap = Arduino_LMIC::GetPinmap_ThisBoard();
@@ -147,11 +145,16 @@ bool formValidator(iotwebconf::WebRequestWrapper* webRequestWrapper){
       loraAppkeyParam.errorMessage = "Bitte als Hex-String xx xx xx... angeben";
       retval=false;
   }
+  //Sending interval
+  uint16_t interval;
+  if(sscanf (loraIntervalValue,"%u",&interval)!=1 || interval <5 ){
+    loraIntervalParam.errorMessage= "Sendeintervall in Minuten (min. 5) angeben";
+    retval=false;
+  }
 
   //sensor
   //Bezeichner
-  String identifier= webRequestWrapper->arg(sensorGroup.identifierParam.getId());
-    
+  String identifier= webRequestWrapper->arg(sensorGroup.identifierParam.getId()); 
   if(identifier.length()==0){
       sensorGroup.identifierParam.errorMessage = "Bezeichner darf nicht leer sein!";
       retval=false;
@@ -163,20 +166,13 @@ bool formValidator(iotwebconf::WebRequestWrapper* webRequestWrapper){
   String opt1= webRequestWrapper->arg(sensorGroup.opt1Param.getId());
     
   if(stype.compareTo("sml")==0){
-      regex_t reegex;
-      char buf[STRING_LEN];
-      opt1.toCharArray(buf, STRING_LEN);
-      //regex for multiple, space separated obis identifier
-      int v=regcomp( &reegex, "^([0-9]\\-[0-9]{1,2}:)?[0-9]\\.[0-9]\\.[0-9]( ([0-9]\\-[0-9]{1,2}:)?[0-9]\\.[0-9]\\.[0-9]){0,3}$", REG_EXTENDED | REG_NOSUB);
-      Serial.println(buf);
-      Serial.println(v);
-      Serial.println(regexec(&reegex, buf, 0, NULL, 0));
-      if(regexec(&reegex, buf, 0, NULL, 0)!=0) {
+      if( !formObisToList(opt1, NULL)){
         sensorGroup.opt1Param.errorMessage = "Zu lesende OBIS-Ids durch Leerzeichen getrennt eingeben!";
         retval=false;  
-      } 
+      }
   }
-  
+
+
   return retval;
 }
 
@@ -219,11 +215,10 @@ void iotwSetup(){
   lorawanGroup.addItem(&loraDeveuiParam);
   lorawanGroup.addItem(&loraAppeuiParam);
   lorawanGroup.addItem(&loraAppkeyParam);
+  lorawanGroup.addItem(&loraIntervalParam);
   iotWebConf.addParameterGroup(&lorawanGroup);
   
   //sensors
-
-  
   iotWebConf.addParameterGroup(&sensorGroup);
 
   
@@ -241,18 +236,13 @@ void iotwSetup(){
 
 
 
-
-
-
-
-
 //start is the number of the byte where the uint32 val starts, beginning at zero
 void fillbufferwithu32(uint32_t v, uint8_t start){
     start+=1; //reserve one byte at the beginning for indication of given values as a mask
-    mydata[start+0] = v & 0xFF; // 0x78
-    mydata[start+1] = (v >> 8) & 0xFF; // 0x56
-    mydata[start+2] = (v >> 16) & 0xFF; // 0x34
-    mydata[start+3] = (v >> 24) & 0xFF; // 0x12
+    loraSendBuffer[start+0] = v & 0xFF; // 0x78
+    loraSendBuffer[start+1] = (v >> 8) & 0xFF; // 0x56
+    loraSendBuffer[start+2] = (v >> 16) & 0xFF; // 0x34
+    loraSendBuffer[start+3] = (v >> 24) & 0xFF; // 0x12
 }
 
 void do_send(osjob_t* j){
@@ -261,7 +251,7 @@ void do_send(osjob_t* j){
         DEBUG(F("OP_TXRXPEND, not sending"));
     } else {
         // Prepare upstream data transmission at the next possible time.
-        LMIC_setTxData2(1, mydata, sizeof(mydata)-1, 0);
+        LMIC_setTxData2(1, loraSendBuffer, sizeof(loraSendBuffer), 0);
         DEBUG(F("Packet queued"));
     }
     // Next TX is scheduled after TX_COMPLETE event.
@@ -290,10 +280,16 @@ void publish(Sensor *sensor, sml_file *file){
                     entry->obj_name->str[2], entry->obj_name->str[3],
                     entry->obj_name->str[4], entry->obj_name->str[5]);
 
-                String obisIds[]={"1-0:1.8.0","1-0:2.8.0"};
+               // String obisIds[]={"1-0:1.8.0","1-0:2.8.0"};
 
-                for(int j=0;j<sizeof(obisIds)/sizeof(obisIds[0]);j++){
-                    if(String(obisIdentifier).startsWith( obisIds[j])){
+                std::list<String> obisIds;
+                formObisToList(sensorGroup.opt1Value, &obisIds);
+                loraSendBuffer=(uint8_t*)malloc(obisIds.size()+1);
+
+                int o=0;
+                	for (std::list<String>::iterator it = obisIds.begin(); it != obisIds.end(); ++it, o++){
+
+                    if(String(obisIdentifier).startsWith( (*it))){
                         DEBUG("OBIS-Id: %s",obisIdentifier);
 
                         if (((entry->value->type & SML_TYPE_FIELD) == SML_TYPE_INTEGER) ||
@@ -305,10 +301,12 @@ void publish(Sensor *sensor, sml_file *file){
                                 prec = 0;
                             value = value * pow(10, scaler);
             
-                            //ignore sign and store kWh with one decimal place
+                            //ignore sign and store with as int with factor 10
+                            // this allows vals from 0 to 429496729,5 to be stored
                             intval=abs(round(value*10));
-                            fillbufferwithu32(intval,j);
-                            //do_send(&sendjob);
+                            fillbufferwithu32(intval,o);
+                            loraSendBuffer[0]= loraSendBuffer[0] | (uint8_t)(1 << o);
+                            
 
                         }else if (false && !sensor->config->numeric_only){    //ignore for now
                             if (entry->value->type == SML_TYPE_OCTET_STRING){
@@ -324,6 +322,8 @@ void publish(Sensor *sensor, sml_file *file){
                     
                     }
                 }
+              do_send(&sendjob);
+
             }
         }
     }  
@@ -429,7 +429,7 @@ void onEvent (ev_t ev) {
 
               
             // Konfiguriere den Wake-up-Trigger. Hier verwenden wir die Timer-Funktion.
-            esp_sleep_enable_timer_wakeup(TX_INTERVAL*1000*1000); // 10.000.000 Mikrosekunden = 10 Sekunden
+            esp_sleep_enable_timer_wakeup(atoi(loraIntervalValue)*60*1000*1000); // 10.000.000 Mikrosekunden = 10 Sekunden
 
             // Gehe in den Deep-Sleep-Modus.
             esp_deep_sleep_start();
@@ -502,14 +502,14 @@ void pseudoSetup(){
   
 	smlSensor = new Sensor(config, process_message);
 
-    DEBUG(F("Sensor setup done.Starting"));
+  DEBUG(F("Sensor setup done.Starting"));
 //    DEBUG(RST_LoRa);
 
     // LMIC init
-    os_init_ex(pPinMap);
+  os_init_ex(pPinMap);
    // os_init();
     // Reset the MAC state. Session and pending data transfers will be discarded.
-    LMIC_reset();
+  LMIC_reset();
     // Start job (sending automatically starts OTAA too)
     //do_send(&sendjob);
 }

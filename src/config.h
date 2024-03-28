@@ -67,7 +67,7 @@ bool formStringToByteArray(String fs, uint8_t* bytearray, uint8_t num_bytes){
     return true;
 }
 
-bool formObisToArray(String fs, String* stringarray){
+bool formObisToList(String fs, std::list<String> *slist){
     bool retval=true;
     uint8_t MAX_OBIS_FIELDS=8;
     regex_t reegex;
@@ -78,18 +78,18 @@ bool formObisToArray(String fs, String* stringarray){
     //Serial.println(buf);
     regmatch_t pmatch[MAX_OBIS_FIELDS+1];   
     //Serial.println(regexec(&reegex, buf, 0, NULL, 0));
-    if(regexec(&reegex, buf, MAX_OBIS_FIELDS+1, pmatch, 0)!=0) {
+    if(regexec(&reegex, buf, 0, NULL, 0)!=0) {
         retval=false;  
     }else{
-        if(stringarray != NULL){
+        if(slist != NULL){
             int a=0;
-            for(int i=0;i < fs.length();i++){
-                char c=fs.charAt(i);
-                if(c != ' '){
-                    stringarray[a].concat(c);
+            String so="";
+            for(int i=0;i < strlen(buf);i++){
+                char c=buf[i];
+                if(c != ' ' && c != '\0'){
+                    so.concat(c);
                 }else{
-                    a++;
-                    stringarray[a]="";
+                    slist->push_back(so);
                 }
             }
         }
