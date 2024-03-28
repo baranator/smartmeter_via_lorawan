@@ -76,7 +76,7 @@ char loraIntervalValue[STRING_LEN];
 IotWebConfParameterGroup lorawanGroup = IotWebConfParameterGroup("lorawang", "LoRaWan");
 iotwebconf::TextParameter loraDeveuiParam = iotwebconf::TextParameter("Dev-EUI (8 Byte, little-endian)", "ldeveui", loraDeveuiValue, STRING_LEN);
 iotwebconf::TextParameter loraAppeuiParam = iotwebconf::TextParameter("App-EUI (8 Byte, little-endian)", "lappeui", loraAppeuiValue, STRING_LEN);
-iotwebconf::TextParameter loraAppkeyParam = iotwebconf::TextParameter("App-Key (16 Byte big-endian", "lappkey", loraAppkeyValue, STRING_LEN);
+iotwebconf::TextParameter loraAppkeyParam = iotwebconf::TextParameter("App-Key (16 Byte big-endian)", "lappkey", loraAppkeyValue, STRING_LEN);
 iotwebconf::TextParameter loraIntervalParam = iotwebconf::TextParameter("Sendeinterval in min", "linterval", loraIntervalValue, STRING_LEN,"60");
 
 
@@ -165,10 +165,10 @@ bool formValidator(iotwebconf::WebRequestWrapper* webRequestWrapper){
       retval=false;
   }
 
-  //datapin
+  //datapins
   String lpin= webRequestWrapper->arg(sensorGroup.dataPinParam.getId());
   if(!isNumeric(lpin)){
-      loraIntervalParam.errorMessage= "Receive-Pin d. Lesekopfes eingeben ";
+      sensorGroup.dataPinParam.errorMessage= "Receive-Pin d. Lesekopfes eingeben ";
       retval=false;
   }
 
