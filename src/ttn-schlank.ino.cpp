@@ -64,7 +64,7 @@ Sensor * smlSensor;
 
 DNSServer dnsServer;
 WebServer server(80);
-IotWebConf iotWebConf(thingName, &dnsServer, &server, wifiInitialApPassword, "7");
+IotWebConf iotWebConf(thingName, &dnsServer, &server, wifiInitialApPassword, "11");
 iotwebconf::OptionalGroupHtmlFormatProvider optionalGroupHtmlFormatProvider;
 
 SensorGroup sensorGroup("sensorGroup");
@@ -145,22 +145,7 @@ bool formValidator(iotwebconf::WebRequestWrapper* webRequestWrapper){
       loraAppkeyParam.errorMessage = "Bitte als Hex-String xx xx xx... angeben";
       retval=false;
   }
-  //Sending interval
-  uint16_t interval;
-  if(sscanf (loraIntervalValue,"%u",&interval)!=1 || interval <5 ){
-    loraIntervalParam.errorMessage= "Sendeintervall in Minuten (min. 5) angeben";
-    retval=false;
-  }
 
-  //sensor
-  //Bezeichner
-  String identifier= webRequestWrapper->arg(sensorGroup.identifierParam.getId()); 
-  if(identifier.length()==0){
-      sensorGroup.identifierParam.errorMessage = "Bezeichner darf nicht leer sein!";
-      retval=false;
-  }
-
-    
   //OBIS
   String stype= webRequestWrapper->arg(sensorGroup.stypeParam.getId());
   String opt1= webRequestWrapper->arg(sensorGroup.opt1Param.getId());
@@ -173,7 +158,24 @@ bool formValidator(iotwebconf::WebRequestWrapper* webRequestWrapper){
   }
 
 
+  //Sending interval
+  String linterval= webRequestWrapper->arg(loraIntervalParam.getId());
+  if(!isNumeric(linterval) || linterval.toInt()<5 ){
+      loraIntervalParam.errorMessage= "Sendeintervall in Minuten (min. 5) angeben";
+      retval=false;
+  }
+
+  //datapin
+  String lpin= webRequestWrapper->arg(sensorGroup.dataPinParam.getId());
+  if(!isNumeric(lpin)){
+      loraIntervalParam.errorMessage= "Receive-Pin d. Lesekopfes eingeben ";
+      retval=false;
+  }
+
   return retval;
+    
+
+  
 }
 
 

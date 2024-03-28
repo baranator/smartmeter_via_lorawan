@@ -14,7 +14,7 @@
 const char thingName[] = "MeterViaLoRa";
 
 // Initial password to connect to the Thing, when it creates an own Access Point.
-const char wifiInitialApPassword[] = "ghghgh12";
+const char wifiInitialApPassword[] = "ghghghgh12";
 
 // When CONFIG_PIN is pulled to ground on startup, the Thing will use the initial password to build an AP. (E.g. in case of lost password)
 #define CONFIG_PIN 34
@@ -40,6 +40,7 @@ static char stypeVals[][STRING_LEN] = { "sml", "s0", "other" };
 boolean isHexString(String s, uint8_t num_bytes){
   regex_t reegex;
   char regstr[50];
+  s.toLowerCase();
   sprintf(regstr, "^[0-9a-f]{2}( [0-9a-f]{2}){%d}$", num_bytes-1);
   char buf[STRING_LEN];
   s.toCharArray(buf, STRING_LEN);
@@ -55,6 +56,7 @@ boolean isHexString(String s, uint8_t num_bytes){
 
 bool formStringToByteArray(String fs, uint8_t* bytearray, uint8_t num_bytes){
     fs.replace(" ","");
+    fs.toLowerCase();
     uint8_t s_len = fs.length();
     if(s_len != num_bytes*2){
         return false;
@@ -97,7 +99,19 @@ bool formObisToList(String fs, std::list<String> *slist){
     return retval;
 }
 
-
+bool isNumeric(String fs){
+    regex_t reegex;
+    char buf[STRING_LEN];
+    fs.toCharArray(buf, STRING_LEN);
+    //regex for multiple, space separated obis identifier
+    int v=regcomp( &reegex, "^[0-9]{1,4}$", REG_EXTENDED | REG_NOSUB);
+    //Serial.println(buf);  
+    //Serial.println(regexec(&reegex, buf, 0, NULL, 0));
+    if(regexec(&reegex, buf, 0, NULL, 0)!=0) {
+        return false;  
+    } 
+    return true;
+}
 
 //const uint8_t NUM_OF_SENSORS = sizeof(SENSOR_CONFIGS) / sizeof(SensorConfig);
 
