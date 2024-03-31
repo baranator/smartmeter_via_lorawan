@@ -204,7 +204,7 @@ void iotwSetup(){
   //general
   iotWebConf.setHtmlFormatProvider(&optionalGroupHtmlFormatProvider);
   iotWebConf.setStatusPin(STATUS_PIN, HIGH);
-  iotWebConf.setConfigPin(CONFIG_PIN);  
+  //iotWebConf.setConfigPin(CONFIG_PIN);  
 
   //callbacks
   iotWebConf.setConfigSavedCallback(goOff);
@@ -304,7 +304,7 @@ void publish(Sensor *sensor, sml_file *file){
                                 prec = 0;
                             value = value * pow(10, scaler);
             
-                            //ignore sign and store with as int with factor 10
+                            //ignore sign and store as 32bit-int with factor 10
                             // this allows vals from 0 to 429496729,5 to be stored
                             intval=abs(round(value*10));
                             fillbufferwithu32(intval,o);
@@ -325,21 +325,22 @@ void publish(Sensor *sensor, sml_file *file){
                     
                     }
                 }
-              do_send(&sendjob);
+              
 
             }
+            
         }
     }  
+    //only send if at least one wanted sml-value could be obtained
+    if(loraSendBuffer[0] > 0){
+      do_send(&sendjob);
+    }
 }
 
 void process_message(byte *buffer, size_t len, Sensor *sensor){
 	// Parse
 	sml_file *file = sml_file_parse(buffer + 8, len - 16);
-
-
-
 	publish(sensor, file);
-
 	// free the malloc'd memory
 	sml_file_free(file);
 }
@@ -485,7 +486,7 @@ void onEvent (ev_t ev) {
     }
 }
 
-void pseudoSetup(){
+void smlAndLoraSetup(){
   //called once when device is in normal offline operation  
       
 
@@ -517,7 +518,7 @@ void pseudoSetup(){
   LMIC_reset();
   //LMIC_setDrJoin(DRCHG_SET, DR_SF12);
     // Start job (sending automatically starts OTAA too)
-  do_send(&sendjob);
+  //do_send(&sendjob);
 }
 
 
@@ -533,31 +534,39 @@ void setup() {
 
   iotwSetup();
 
+  if(esp_reset_reason()==ESP_RST_DEEPSLEEP){
+    DEBUG(F("wakeup from deepsleep"));
+    iotWebConf.goOffLine();
+  }
     
 }
 
-void pseudoLoop(){
+void smlAndLoraLoop(){
     smlSensor->loop();
     os_runloop_once();
 }
 
 void loop() {
-  iotWebConf.doLoop();
-  if(esp_reset_reason()==ESP_RST_DEEPSLEEP){
-    DEBUG(F("wakeup from deepsleep"));
-    iotWebConf.goOffLine();
-  }else if (iotWebConf.getState() == iotwebconf::NotConfigured){
-    unsigned long now = millis();
-    if (OFF_LINE_AFTER_MS < (now - iotWebConf.getApStartTimeMs())){
-      iotWebConf.goOffLine();
-      DEBUG(F("Gone off-line. Press button to return AP mode."));
-    }
-  }else if (iotWebConf.getState() == iotwebconf::OffLine){
+  
+
+  if (iotWebConf.getState() == iotwebconf::OffLine){
     if(firstRun){
       DEBUG(F("Gerät gestartet; Pseudo-Setup"));
       firstRun=false;
-      pseudoSetup();
+      smlAndLoraSetup();
     }
-    pseudoLoop();
+    smlAndLoraLoop();
   }
+  iotWebConf.doLoop();
+
+
+
+  if (iotWebConf.getState() == iotwebconf::NotConfigured){
+    
+    unsigned long now = millis();
+    if (OFF_LINE_AFTER_MS < (now - iotWebConf.getApStartTimeMs()) && WiFi.softAPgetStationNum() == 0){
+      iotWebConf.goOffLine();
+      DEBUG(F("Gone off-line. Press button to return AP mode."));
+    }
+  } 
 }
