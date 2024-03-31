@@ -64,20 +64,20 @@ Sensor * smlSensor;
 
 DNSServer dnsServer;
 WebServer server(80);
-IotWebConf iotWebConf(thingName, &dnsServer, &server, wifiInitialApPassword, "11");
+IotWebConf iotWebConf(thingName, &dnsServer, &server, wifiInitialApPassword, "13");
 iotwebconf::OptionalGroupHtmlFormatProvider optionalGroupHtmlFormatProvider;
 
 SensorGroup sensorGroup("sensorGroup");
 char loraDeveuiValue[STRING_LEN];
 char loraAppeuiValue[STRING_LEN];
 char loraAppkeyValue[STRING_LEN];
-char loraIntervalValue[STRING_LEN];
+char loraIntervalValue[NUMBER_LEN];
 
 IotWebConfParameterGroup lorawanGroup = IotWebConfParameterGroup("lorawang", "LoRaWan");
 iotwebconf::TextParameter loraDeveuiParam = iotwebconf::TextParameter("Dev-EUI (8 Byte, little-endian)", "ldeveui", loraDeveuiValue, STRING_LEN);
 iotwebconf::TextParameter loraAppeuiParam = iotwebconf::TextParameter("App-EUI (8 Byte, little-endian)", "lappeui", loraAppeuiValue, STRING_LEN);
 iotwebconf::TextParameter loraAppkeyParam = iotwebconf::TextParameter("App-Key (16 Byte big-endian)", "lappkey", loraAppkeyValue, STRING_LEN);
-iotwebconf::TextParameter loraIntervalParam = iotwebconf::TextParameter("Sendeinterval in min", "linterval", loraIntervalValue, STRING_LEN,"60");
+iotwebconf::TextParameter loraIntervalParam = iotwebconf::TextParameter("Sendeinterval in min", "linterval", loraIntervalValue, NUMBER_LEN,"60");
 
 
 //LoRaWan Stuff
@@ -94,8 +94,8 @@ const lmic_pinmap *pPinMap = Arduino_LMIC::GetPinmap_ThisBoard();
 //void os_getArtEui (u1_t* buf) { memcpy_P(buf, APPEUI, 8);}
 void os_getArtEui (u1_t* buf) { 
   u1_t APPEUI[8];
-  formStringToByteArray(String(loraAppeuiValue), APPEUI, 8);
-  memcpy_P(buf, APPEUI, 8);
+  formStringToByteArray(loraAppeuiValue, APPEUI, 8);
+  memcpy(buf, APPEUI, 8);
 }
 
 
@@ -104,8 +104,8 @@ void os_getArtEui (u1_t* buf) {
 //void os_getDevEui (u1_t* buf) { memcpy_P(buf, DEVEUI, 8);}
 void os_getDevEui (u1_t* buf) { 
   u1_t DEVEUI[8];
-  formStringToByteArray(String(loraDeveuiValue), DEVEUI, 8);
-  memcpy_P(buf, DEVEUI, 8);
+  formStringToByteArray(loraDeveuiValue, DEVEUI, 8);
+  memcpy(buf, DEVEUI, 8);
 }
 
 // This key should be in big endian format (or, since it is not really a
@@ -116,8 +116,8 @@ void os_getDevEui (u1_t* buf) {
 
 void os_getDevKey (u1_t* buf) {  
   u1_t APPKEY[16];
-  formStringToByteArray(String(loraAppkeyValue), APPKEY, 16);
-  memcpy_P(buf, APPKEY, 16);
+  formStringToByteArray(loraAppkeyValue, APPKEY, 16);
+  memcpy(buf, APPKEY, 16);
 }
 
 boolean sending=false;
@@ -172,7 +172,8 @@ bool formValidator(iotwebconf::WebRequestWrapper* webRequestWrapper){
       retval=false;
   }
 
-  return retval;
+  return retval; 
+  
     
 
   
@@ -403,6 +404,8 @@ void onEvent (ev_t ev) {
             // during join, but because slow data rates change max TX
       // size, we don't use it in this example.
             LMIC_setLinkCheckMode(0);
+            //TODO ONLY TESTING, REMOVE SEND LATER
+            //do_send(&sendjob);
             break;
         /*
         || This event is defined but not used in the code. No
@@ -431,8 +434,9 @@ void onEvent (ev_t ev) {
 
               
             // Konfiguriere den Wake-up-Trigger. Hier verwenden wir die Timer-Funktion.
-            esp_sleep_enable_timer_wakeup(atoi(loraIntervalValue)*60*1000*1000); // 10.000.000 Mikrosekunden = 10 Sekunden
-
+            esp_sleep_enable_timer_wakeup(1*60*1000*1000); // 10.000.000 Mikrosekunden = 10 Sekunden
+            DEBUG(F("Go sleepy !!"));
+           // DEBUG(F(atoi(loraIntervalValue)));
             // Gehe in den Deep-Sleep-Modus.
             esp_deep_sleep_start();
 
@@ -485,10 +489,6 @@ void pseudoSetup(){
   //called once when device is in normal offline operation  
       
 
-    #ifdef DEBUG
-	// Delay for getting a serial console attached in time
-	    delay(2000);
-    #endif
 
 	// Setup reading heads
 	//DEBUG("Setting up max. %d configured sensors...", MAX_NUM_OF_SENSORS);
@@ -511,15 +511,24 @@ void pseudoSetup(){
   os_init_ex(pPinMap);
    // os_init();
     // Reset the MAC state. Session and pending data transfers will be discarded.
+  
+ // LMIC.dn2Dr = DR_SF12;
+ // LMIC_setDrTxpow(DR_SF12,14);
   LMIC_reset();
+  //LMIC_setDrJoin(DRCHG_SET, DR_SF12);
     // Start job (sending automatically starts OTAA too)
-    //do_send(&sendjob);
+  do_send(&sendjob);
 }
 
 
 void setup() {
   SERIAL_DEBUG_SETUP(9600);
 
+  #ifdef DEBUG
+	  // Delay for getting a serial console attached in time
+	  delay(1000);
+  #endif
+  DEBUG(esp_reset_reason());
   DEBUG(F("Starting up..."));
 
   iotwSetup();
@@ -533,27 +542,22 @@ void pseudoLoop(){
 }
 
 void loop() {
-
-
-      // -- doLoop should be called as frequently as possible.
   iotWebConf.doLoop();
-
-  if (iotWebConf.getState() == iotwebconf::NotConfigured){
+  if(esp_reset_reason()==ESP_RST_DEEPSLEEP){
+    DEBUG(F("wakeup from deepsleep"));
+    iotWebConf.goOffLine();
+  }else if (iotWebConf.getState() == iotwebconf::NotConfigured){
     unsigned long now = millis();
     if (OFF_LINE_AFTER_MS < (now - iotWebConf.getApStartTimeMs())){
-
+      iotWebConf.goOffLine();
+      DEBUG(F("Gone off-line. Press button to return AP mode."));
     }
-  }
-  else if (iotWebConf.getState() == iotwebconf::OffLine){
+  }else if (iotWebConf.getState() == iotwebconf::OffLine){
     if(firstRun){
+      DEBUG(F("Gerät gestartet; Pseudo-Setup"));
       firstRun=false;
       pseudoSetup();
-      DEBUG(F("Gerät gestartet; Pseudo-Setup"));
     }
-    DEBUG(F("loop"));
     pseudoLoop();
-    
   }
-
-
 }

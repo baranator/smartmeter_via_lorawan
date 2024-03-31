@@ -21,9 +21,10 @@ const char wifiInitialApPassword[] = "ghghghgh12";
 #define STATUS_PIN 35
 
 // Go to off-line mode after this time was passed and inital configuration is not done.
-#define OFF_LINE_AFTER_MS 10*60*10000
+#define OFF_LINE_AFTER_MS 1*15*1000
 
-#define STRING_LEN 128
+#define LONG_STRING_LEN 128
+#define STRING_LEN 64
 #define NUMBER_LEN 32
 
 static char stypeVals[][STRING_LEN] = { "sml", "s0", "other" };
@@ -54,17 +55,21 @@ boolean isHexString(String s, uint8_t num_bytes){
   return true;
 }
 
-bool formStringToByteArray(String fs, uint8_t* bytearray, uint8_t num_bytes){
-    fs.replace(" ","");
-    fs.toLowerCase();
-    uint8_t s_len = fs.length();
-    if(s_len != num_bytes*2){
+bool formStringToByteArray(char* fs, uint8_t* bytearray, uint8_t num_bytes){
+    uint16_t s_len = strlen(fs);
+    for(int i=0;i<s_len;i++){
+        fs[i]=tolower(fs[i]);
+    }
+
+  //  DEBUG(fs);
+    
+    if(s_len != 3*num_bytes-1){
         return false;
     }
 
-    for (int i = 0; i < (s_len / 2); i++) {
-        sscanf(fs.c_str() + 2*i, "%02x", &bytearray[i]);
-        printf("bytearray %d: %02x\n", i, bytearray[i]);
+    for (int i = 0; i < num_bytes; i++) {
+        sscanf( fs+ 3*i, "%2hhx", bytearray+i);
+       //printf("bytearray %d: %02x\n", i, bytearray[i]);
     }
     return true;
 }
