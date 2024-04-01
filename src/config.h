@@ -17,7 +17,7 @@ const char wifiInitialApPassword[] = "MeterViaLoRa";
 #define STATUS_PIN 35
 
 // Go to off-line mode after this time was passed and inital configuration is not done.
-#define OFF_LINE_AFTER_MS 1*30*1000
+#define OFF_LINE_AFTER_MS 1*15*1000
 
 #define LONG_STRING_LEN 128
 #define STRING_LEN 64
@@ -75,10 +75,13 @@ bool formObisToList(String fs, std::list<String> *slist){
             String so="";
             for(int i=0;i < strlen(buf);i++){
                 char c=buf[i];
-                if(c != ' ' && c != '\0'){
+                if(c != ' '){
                     so.concat(c);
-                }else{
+                }
+                if(c == ' ' || i == strlen(buf)-1){
+                    DEBUG("Pushing ", so);
                     slist->push_back(so);
+                    so="";
                 }
             }
         }

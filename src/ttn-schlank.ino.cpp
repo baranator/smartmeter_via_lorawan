@@ -58,14 +58,14 @@
 
 boolean firstRun=true;
 Sensor * smlSensor;
-
+unsigned long tryingSince;
 
 // IOT Webconf
 
 DNSServer dnsServer;
 WebServer server(80);
 IotWebConf iotWebConf(thingName, &dnsServer, &server, wifiInitialApPassword, "13");
-iotwebconf::OptionalGroupHtmlFormatProvider optionalGroupHtmlFormatProvider;
+//iotwebconf::OptionalGroupHtmlFormatProvider optionalGroupHtmlFormatProvider;
 
 SensorGroup sensorGroup("sensorGroup");
 char loraDeveuiValue[STRING_LEN];
@@ -83,6 +83,9 @@ iotwebconf::TextParameter loraIntervalParam = iotwebconf::TextParameter("Sendein
 //LoRaWan Stuff
 
 static uint8_t* loraSendBuffer;
+static uint16_t loraSendBufferSize;
+std::list<String> obisIds;
+
 static osjob_t sendjob;
 
 const Arduino_LMIC::HalConfiguration_t myConfig;
@@ -202,7 +205,7 @@ void goOff(){
 
 void iotwSetup(){
   //general
-  iotWebConf.setHtmlFormatProvider(&optionalGroupHtmlFormatProvider);
+  //iotWebConf.setHtmlFormatProvider(&optionalGroupHtmlFormatProvider);
   iotWebConf.setStatusPin(STATUS_PIN, HIGH);
   //iotWebConf.setConfigPin(CONFIG_PIN);  
 
@@ -246,6 +249,8 @@ void fillbufferwithu32(uint32_t v, uint8_t start){
     loraSendBuffer[start+1] = (v >> 8) & 0xFF; // 0x56
     loraSendBuffer[start+2] = (v >> 16) & 0xFF; // 0x34
     loraSendBuffer[start+3] = (v >> 24) & 0xFF; // 0x12
+
+    DEBUG(loraSendBuffer[start+0],loraSendBuffer[start+1],loraSendBuffer[start+2],loraSendBuffer[start+3]);
 }
 
 void do_send(osjob_t* j){
@@ -254,17 +259,13 @@ void do_send(osjob_t* j){
         DEBUG(F("OP_TXRXPEND, not sending"));
     } else {
         // Prepare upstream data transmission at the next possible time.
-        LMIC_setTxData2(1, loraSendBuffer, sizeof(loraSendBuffer), 0);
+        LMIC_setTxData2(1, loraSendBuffer, loraSendBufferSize, 0);
         DEBUG(F("Packet queued"));
     }
     // Next TX is scheduled after TX_COMPLETE event.
 }
 
-void publish(Sensor *sensor, sml_file *file){
-    if(sending){
-        return;
-    }
-        
+boolean publish(Sensor *sensor, sml_file *file){
     for (int i = 0; i < file->messages_len; i++){
         sml_message *message = file->messages[i];
         if (*message->message_body->tag == SML_MESSAGE_GET_LIST_RESPONSE){
@@ -285,13 +286,13 @@ void publish(Sensor *sensor, sml_file *file){
 
                // String obisIds[]={"1-0:1.8.0","1-0:2.8.0"};
 
-                std::list<String> obisIds;
-                formObisToList(sensorGroup.opt1Value, &obisIds);
-                loraSendBuffer=(uint8_t*)malloc(obisIds.size()+1);
+                
+                
 
                 int o=0;
                 	for (std::list<String>::iterator it = obisIds.begin(); it != obisIds.end(); ++it, o++){
-
+                    DEBUG(" arrived " ,obisIdentifier);
+                    DEBUG("checking for match with", (*it));
                     if(String(obisIdentifier).startsWith( (*it))){
                         DEBUG("OBIS-Id: %s",obisIdentifier);
 
@@ -307,7 +308,7 @@ void publish(Sensor *sensor, sml_file *file){
                             //ignore sign and store as 32bit-int with factor 10
                             // this allows vals from 0 to 429496729,5 to be stored
                             intval=abs(round(value*10));
-                            fillbufferwithu32(intval,o);
+                            fillbufferwithu32(intval,o*4);  //4bytes for uint32t
                             loraSendBuffer[0]= loraSendBuffer[0] | (uint8_t)(1 << o);
                             
 
@@ -320,13 +321,9 @@ void publish(Sensor *sensor, sml_file *file){
                             }else if (entry->value->type == SML_TYPE_BOOLEAN){
                                 //publish(entryTopic + "value", entry->value->data.boolean ? "true" : "false");
                             }
-                        }
-
-                    
+                        }   
                     }
                 }
-              
-
             }
             
         }
@@ -334,18 +331,28 @@ void publish(Sensor *sensor, sml_file *file){
     //only send if at least one wanted sml-value could be obtained
     if(loraSendBuffer[0] > 0){
       do_send(&sendjob);
+      return true;
     }
+    return false;
 }
 
-void process_message(byte *buffer, size_t len, Sensor *sensor){
+boolean process_message(byte *buffer, size_t len, Sensor *sensor){
 	// Parse
 	sml_file *file = sml_file_parse(buffer + 8, len - 16);
-	publish(sensor, file);
+	boolean ret = publish(sensor, file);
 	// free the malloc'd memory
 	sml_file_free(file);
+  return ret;
 }
 
+void doSleepy(unsigned long duration_ms){
+  // Konfiguriere den Wake-up-Trigger. Hier verwenden wir die Timer-Funktion.
+  esp_sleep_enable_timer_wakeup(duration_ms*1000); // 10.000.000 Mikrosekunden = 10 Sekunden
+  DEBUG("Go sleepy for %i ms!!",duration_ms);
+  // Gehe in den Deep-Sleep-Modus.
+  esp_deep_sleep_start();
 
+}
 
 
 void printHex2(unsigned v) {
@@ -434,12 +441,7 @@ void onEvent (ev_t ev) {
             // Schedule next transmission
 
               
-            // Konfiguriere den Wake-up-Trigger. Hier verwenden wir die Timer-Funktion.
-            esp_sleep_enable_timer_wakeup(1*60*1000*1000); // 10.000.000 Mikrosekunden = 10 Sekunden
-            DEBUG(F("Go sleepy !!"));
-           // DEBUG(F(atoi(loraIntervalValue)));
-            // Gehe in den Deep-Sleep-Modus.
-            esp_deep_sleep_start();
+            doSleepy(atoi(loraIntervalValue)*60*1000);
 
             break;
         case EV_LOST_TSYNC:
@@ -498,11 +500,14 @@ void smlAndLoraSetup(){
 
   static const SensorConfig* config = new SensorConfig{
     .pin = (uint8_t)atoi(sensorGroup.dataPinValue),
-    .numeric_only = false,
-    .interval = 99 //only once
+    .numeric_only = false
   };
 
-  
+  formObisToList(sensorGroup.opt1Value, &obisIds);
+  loraSendBufferSize=obisIds.size()*4+1;
+  loraSendBuffer=(uint8_t*)malloc(loraSendBufferSize); 
+  loraSendBuffer[0]=0;
+
 	smlSensor = new Sensor(config, process_message);
 
   DEBUG(F("Sensor setup done.Starting"));
@@ -519,6 +524,7 @@ void smlAndLoraSetup(){
   //LMIC_setDrJoin(DRCHG_SET, DR_SF12);
     // Start job (sending automatically starts OTAA too)
   //do_send(&sendjob);
+  tryingSince=millis();
 }
 
 
@@ -544,6 +550,11 @@ void setup() {
 void smlAndLoraLoop(){
     smlSensor->loop();
     os_runloop_once();
+    //TODO: ensur, taht  loraInterval is bigger than the val timePassedMs is compared with
+    unsigned long timePassedMs = millis()-tryingSince;
+    if(timePassedMs>2*60*1000){
+      doSleepy(atoi(loraIntervalValue)*60*1000-timePassedMs);
+    }
 }
 
 void loop() {
